@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.75 as builder
+FROM rust:1.89 as builder
 
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y \
 COPY --from=builder /app/target/release/weather-exporter /usr/local/bin/weather-exporter
 
 ENV PORT=9090
-ENV WEATHER_LOCATION=Oslo
+ENV WEATHER_LOCATION=Lund
 
 EXPOSE 9090
 
