@@ -1,0 +1,49 @@
+# Configuration for GitHub releases
+
+# Project name (for display purposes)
+name: Weather Exporter
+
+# Project description
+description: A Prometheus exporter for weather data from yr.no API
+
+# Authors
+authors:
+  - Joxtacy
+
+# License
+license: MIT
+
+# Repository URL
+repository: https://github.com/Joxtacy/weather-exporter
+
+# Categories (for documentation)
+categories:
+  - monitoring
+  - prometheus
+  - weather
+  - metrics
+
+# Keywords for searchability
+keywords:
+  - weather
+  - prometheus
+  - exporter
+  - metrics
+  - yr.no
+  - monitoring
+  - rust
+
+# Supported platforms
+platforms:
+  - linux/amd64
+  - linux/arm64
+  - linux/arm/v7
+  - darwin/amd64
+  - darwin/arm64
+  - windows/amd64
+
+# Docker images
+docker:
+  registries:
+    - docker.io/joxtacy/weather-exporter
+    - ghcr.io/joxtacy/weather-exporter

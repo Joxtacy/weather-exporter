@@ -1,5 +1,11 @@
 # Weather Exporter for Prometheus
 
+[![Build and Test](https://github.com/Joxtacy/weather-exporter/actions/workflows/build.yml/badge.svg)](https://github.com/Joxtacy/weather-exporter/actions/workflows/build.yml)
+[![Security Audit](https://github.com/Joxtacy/weather-exporter/actions/workflows/security.yml/badge.svg)](https://github.com/Joxtacy/weather-exporter/actions/workflows/security.yml)
+[![Docker Pulls](https://img.shields.io/docker/pulls/joxtacy/weather-exporter)](https://hub.docker.com/r/joxtacy/weather-exporter)
+[![GitHub Release](https://img.shields.io/github/v/release/Joxtacy/weather-exporter)](https://github.com/Joxtacy/weather-exporter/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A Rust-based weather metrics exporter that fetches weather data from yr.no API and exposes it in Prometheus format. Supports monitoring multiple locations simultaneously.
 
 ## Features
@@ -18,6 +24,47 @@ A Rust-based weather metrics exporter that fetches weather data from yr.no API a
   - Precipitation (mm)
   - Cloud coverage (%)
   - UV index
+
+## Installation
+
+### Pre-built Binaries
+
+Download the latest release from the [GitHub Releases](https://github.com/Joxtacy/weather-exporter/releases) page.
+
+```bash
+# Linux (amd64)
+curl -L https://github.com/Joxtacy/weather-exporter/releases/latest/download/weather-exporter-linux-amd64.tar.gz | tar xz
+
+# Linux (arm64)
+curl -L https://github.com/Joxtacy/weather-exporter/releases/latest/download/weather-exporter-linux-arm64.tar.gz | tar xz
+
+# macOS (Intel)
+curl -L https://github.com/Joxtacy/weather-exporter/releases/latest/download/weather-exporter-macos-amd64.tar.gz | tar xz
+
+# macOS (Apple Silicon)
+curl -L https://github.com/Joxtacy/weather-exporter/releases/latest/download/weather-exporter-macos-arm64.tar.gz | tar xz
+
+# Make it executable
+chmod +x weather-exporter
+```
+
+### From Source
+
+```bash
+git clone https://github.com/Joxtacy/weather-exporter.git
+cd weather-exporter
+cargo build --release
+```
+
+### Docker
+
+```bash
+# From Docker Hub
+docker pull joxtacy/weather-exporter:latest
+
+# From GitHub Container Registry
+docker pull ghcr.io/joxtacy/weather-exporter:latest
+```
 
 ## Building
 
@@ -153,6 +200,66 @@ Create a Grafana variable for location selection:
 ## API Attribution
 
 This application uses the yr.no API provided by the Norwegian Meteorological Institute. Please respect their [terms of service](https://developer.yr.no/doc/TermsOfService/).
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+### Development
+
+```bash
+# Run tests
+cargo test
+# or
+make test
+
+# Run with logging
+RUST_LOG=debug cargo run -- "Oslo"
+# or
+make run-debug LOCATIONS="Oslo"
+
+# Format code
+cargo fmt
+# or
+make fmt
+
+# Run clippy
+cargo clippy -- -D warnings
+# or
+make lint
+
+# Run all checks
+make check
+```
+
+### Releasing
+
+To create a new release:
+
+```bash
+# Patch release (bug fixes)
+make release-patch
+# or
+./scripts/release.sh patch
+
+# Minor release (new features)
+make release-minor
+# or
+./scripts/release.sh minor
+
+# Major release (breaking changes)
+make release-major
+# or
+./scripts/release.sh major
+```
+
+See [RELEASING.md](RELEASING.md) for detailed release instructions.
 
 ## Author
 
