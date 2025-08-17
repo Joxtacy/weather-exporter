@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y \
 COPY --from=builder /app/target/release/weather-exporter /usr/local/bin/weather-exporter
 
 ENV PORT=9090
-ENV WEATHER_LOCATION=Lund
+ENV WEATHER_LOCATIONS=Oslo
 
 EXPOSE 9090
 

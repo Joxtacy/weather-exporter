@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
 use prometheus::{Encoder, GaugeVec, IntGaugeVec, Opts, Registry, TextEncoder};
 use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
@@ -193,37 +193,57 @@ impl WeatherCache {
     }
 }
 
+// Data for a single location
+#[derive(Clone)]
+struct LocationData {
+    location: Option<Location>,
+    cache: WeatherCache,
+}
+
+impl LocationData {
+    fn new() -> Self {
+        Self {
+            location: None,
+            cache: WeatherCache::new(),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct AppState {
-    location_name: String,
-    location: Arc<RwLock<Option<Location>>>,
-    weather_cache: Arc<RwLock<WeatherCache>>,
+    location_names: Vec<String>,
+    locations: Arc<RwLock<HashMap<String, LocationData>>>,
     client: reqwest::Client,
 }
 
 impl AppState {
-    fn new(location_name: String) -> Self {
+    fn new(location_names: Vec<String>) -> Self {
         let client = reqwest::Client::builder()
             .user_agent("weather-exporter/0.1.0 github.com/Joxtacy/weather-exporter")
             .timeout(Duration::from_secs(30))
             .build()
             .expect("Failed to build HTTP client");
 
+        // Initialize HashMap with empty LocationData for each location
+        let mut locations = HashMap::new();
+        for name in &location_names {
+            locations.insert(name.clone(), LocationData::new());
+        }
+
         Self {
-            location_name,
-            location: Arc::new(RwLock::new(None)),
-            weather_cache: Arc::new(RwLock::new(WeatherCache::new())),
+            location_names,
+            locations: Arc::new(RwLock::new(locations)),
             client,
         }
     }
 
-    async fn search_location(&self) -> Result<Location> {
+    async fn search_location(&self, location_name: &str) -> Result<Location> {
         let url = format!(
             "https://www.yr.no/api/v0/locations/search?q={}",
-            urlencoding::encode(&self.location_name)
+            urlencoding::encode(location_name)
         );
 
-        info!("Searching for location: {}", self.location_name);
+        info!("Searching for location: {}", location_name);
 
         let response = self
             .client
@@ -237,7 +257,7 @@ impl AppState {
             .embedded
             .and_then(|e| e.location)
             .and_then(|locs| locs.into_iter().next())
-            .ok_or_else(|| anyhow::anyhow!("Location not found: {}", self.location_name))?;
+            .ok_or_else(|| anyhow::anyhow!("Location not found: {}", location_name))?;
 
         info!(
             "Found location: {} at ({}, {})",
@@ -247,45 +267,52 @@ impl AppState {
         Ok(location)
     }
 
-    async fn fetch_weather(&self, location: &Location) -> Result<()> {
+    async fn fetch_weather(
+        &self,
+        location_name: &str,
+        location: &Location,
+        cache: &WeatherCache,
+    ) -> Result<WeatherCache> {
         // Check if cache is still valid
-        let cache = self.weather_cache.read().await;
         if !cache.is_expired() && cache.data.is_some() {
-            info!("Using cached weather data (expires: {:?})", cache.expires);
-            WEATHER_CACHE_HITS
-                .with_label_values(&[&location.name])
-                .inc();
-            return Ok(());
+            info!(
+                "Using cached weather data for {} (expires: {:?})",
+                location_name, cache.expires
+            );
+            WEATHER_CACHE_HITS.with_label_values(&[location_name]).inc();
+            return Ok(cache.clone());
         }
-        let last_modified = cache.last_modified.clone();
-        drop(cache);
 
         // Round coordinates to 4 decimals as required by the API
         let (lat, lon) = location.position.rounded();
         let url = format!(
-            "https://api.met.no/weatherapi/locationforecast/2.0/compact?lat={lat}&lon={lon}"
+            "https://api.met.no/weatherapi/locationforecast/2.0/compact?lat={}&lon={}",
+            lat, lon
         );
 
         info!(
             "Fetching weather for {} (rounded coords: {}, {})",
-            location.name, lat, lon
+            location_name, lat, lon
         );
 
         // Build request with If-Modified-Since header if we have cached data
         let mut request = self.client.get(&url);
-        if let Some(ref last_mod) = last_modified {
-            debug!("Adding If-Modified-Since header: {}", last_mod);
+        if let Some(ref last_mod) = cache.last_modified {
+            debug!(
+                "Adding If-Modified-Since header for {}: {}",
+                location_name, last_mod
+            );
             request = request.header("If-Modified-Since", last_mod);
         }
 
         let response = request.send().await?;
 
-        WEATHER_API_CALLS.with_label_values(&[&location.name]).inc();
+        WEATHER_API_CALLS.with_label_values(&[location_name]).inc();
 
         // Handle different status codes
         match response.status() {
             StatusCode::OK => {
-                info!("Received new weather data");
+                info!("Received new weather data for {}", location_name);
 
                 // Extract headers
                 let expires = response
@@ -308,36 +335,48 @@ impl AppState {
 
                 let weather_data = response.json::<WeatherResponse>().await?;
 
-                // Update cache
-                let mut cache = self.weather_cache.write().await;
-                cache.data = Some(weather_data);
-                cache.expires = expires;
-                cache.last_modified = last_modified;
+                // Return new cache
+                let new_cache = WeatherCache {
+                    data: Some(weather_data),
+                    expires,
+                    last_modified,
+                };
 
-                info!("Weather data cached until: {:?}", expires);
-                Ok(())
+                info!(
+                    "Weather data for {} cached until: {:?}",
+                    location_name, expires
+                );
+                Ok(new_cache)
             }
             StatusCode::NOT_MODIFIED => {
-                info!("Weather data not modified, using cached version");
-                WEATHER_CACHE_HITS
-                    .with_label_values(&[&location.name])
-                    .inc();
-                Ok(())
+                info!(
+                    "Weather data not modified for {}, using cached version",
+                    location_name
+                );
+                WEATHER_CACHE_HITS.with_label_values(&[location_name]).inc();
+                Ok(cache.clone())
             }
             StatusCode::TOO_MANY_REQUESTS => {
-                error!("Rate limited by API - too many requests");
+                error!(
+                    "Rate limited by API for {} - too many requests",
+                    location_name
+                );
                 Err(anyhow::anyhow!(
                     "Rate limited - please reduce request frequency"
                 ))
             }
             StatusCode::FORBIDDEN => {
-                error!("Forbidden - check User-Agent header");
+                error!("Forbidden for {} - check User-Agent header", location_name);
                 Err(anyhow::anyhow!(
                     "API returned 403 Forbidden - check configuration"
                 ))
             }
             _ => {
-                error!("Unexpected status code: {}", response.status());
+                error!(
+                    "Unexpected status code for {}: {}",
+                    location_name,
+                    response.status()
+                );
                 Err(anyhow::anyhow!(
                     "Unexpected API response: {}",
                     response.status()
@@ -346,42 +385,76 @@ impl AppState {
         }
     }
 
-    async fn update_metrics(&self) -> Result<()> {
-        // Get or search for location
-        let location = {
-            let loc = self.location.read().await;
-            if let Some(l) = loc.as_ref() {
-                l.clone()
-            } else {
-                drop(loc); // Release read lock before acquiring write lock
-                let new_location = self.search_location().await?;
-                let mut loc = self.location.write().await;
-                *loc = Some(new_location.clone());
-                new_location
+    async fn update_metrics_for_location(&self, location_name: &str) -> Result<()> {
+        // Get or initialize location data
+        let mut locations = self.locations.write().await;
+        let location_data = locations
+            .get_mut(location_name)
+            .ok_or_else(|| anyhow::anyhow!("Location {} not found in state", location_name))?;
+
+        // Get or search for location coordinates
+        if location_data.location.is_none() {
+            match self.search_location(location_name).await {
+                Ok(loc) => {
+                    location_data.location = Some(loc);
+                }
+                Err(e) => {
+                    error!("Failed to search for location {}: {}", location_name, e);
+                    WEATHER_FETCH_SUCCESS
+                        .with_label_values(&[location_name])
+                        .set(0);
+                    return Err(e);
+                }
             }
-        };
+        }
+
+        let location = location_data.location.as_ref().unwrap().clone();
+        let current_cache = location_data.cache.clone();
+
+        // Release write lock before making HTTP request
+        drop(locations);
 
         // Fetch weather data (will use cache if not expired)
-        match self.fetch_weather(&location).await {
-            Ok(_) => {
+        match self
+            .fetch_weather(location_name, &location, &current_cache)
+            .await
+        {
+            Ok(new_cache) => {
+                // Update cache if we got new data
+                let mut locations = self.locations.write().await;
+                if let Some(location_data) = locations.get_mut(location_name) {
+                    location_data.cache = new_cache.clone();
+                }
+                drop(locations);
+
                 WEATHER_FETCH_SUCCESS
-                    .with_label_values(&[&location.name])
+                    .with_label_values(&[location_name])
                     .set(1);
+
+                // Update metrics from cache
+                self.update_prometheus_metrics(location_name, &location, &new_cache)?;
             }
             Err(e) => {
                 WEATHER_FETCH_SUCCESS
-                    .with_label_values(&[&location.name])
+                    .with_label_values(&[location_name])
                     .set(0);
                 return Err(e);
             }
         }
 
-        // Get weather data from cache
-        let cache = self.weather_cache.read().await;
+        Ok(())
+    }
+
+    fn update_prometheus_metrics(
+        &self,
+        location_name: &str,
+        location: &Location,
+        cache: &WeatherCache,
+    ) -> Result<()> {
         let weather = cache
             .data
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No weather data in cache"))?;
+            .ok_or_else(|| anyhow::anyhow!("No weather data in cache for {}", location_name))?;
 
         // Find the timeseries entry closest to current time
         let now = Utc::now();
@@ -396,12 +469,12 @@ impl AppState {
 
         if let Some(current) = current {
             info!(
-                "Using weather data from {} (current time: {})",
-                current.time, now
+                "Using weather data for {} from {} (current time: {})",
+                location_name, current.time, now
             );
 
             let labels = [
-                &location.name,
+                location_name,
                 &location.position.lat.to_string(),
                 &location.position.lon.to_string(),
             ];
@@ -437,26 +510,35 @@ impl AppState {
             }
 
             // Precipitation from next hour forecast
-            if let Some(next_hour) = &current.data.next_1_hours {
-                if let Some(precip) = next_hour.details.precipitation_amount {
-                    PRECIPITATION.with_label_values(&labels).set(precip);
-                }
+            if let Some(next_hour) = &current.data.next_1_hours
+                && let Some(precip) = next_hour.details.precipitation_amount
+            {
+                PRECIPITATION.with_label_values(&labels).set(precip);
             }
 
-            info!("Metrics updated successfully for {}", location.name);
+            info!("Metrics updated successfully for {}", location_name);
         } else {
-            warn!("No timeseries data available for {}", location.name);
+            warn!("No timeseries data available for {}", location_name);
         }
 
         Ok(())
     }
+
+    async fn update_all_metrics(&self) {
+        // Update metrics for all locations
+        for location_name in &self.location_names {
+            if let Err(e) = self.update_metrics_for_location(location_name).await {
+                error!("Failed to update metrics for {}: {}", location_name, e);
+            }
+            // Small delay between locations to avoid hitting rate limits
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
 }
 
 async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
-    // Update metrics before serving them
-    if let Err(e) = state.update_metrics().await {
-        warn!("Failed to update metrics: {}", e);
-    }
+    // Update metrics for all locations before serving them
+    state.update_all_metrics().await;
 
     let encoder = TextEncoder::new();
     let metric_families = REGISTRY.gather();
@@ -476,21 +558,44 @@ async fn periodic_update(state: AppState) {
     loop {
         interval.tick().await;
 
-        // Only fetch if cache is expired
-        let should_update = {
-            let cache = state.weather_cache.read().await;
-            cache.is_expired()
-        };
+        // Check each location and update if cache expired
+        for location_name in &state.location_names {
+            let should_update = {
+                let locations = state.locations.read().await;
+                if let Some(location_data) = locations.get(location_name) {
+                    location_data.cache.is_expired()
+                } else {
+                    true // If not initialized, we should update
+                }
+            };
 
-        if should_update {
-            info!("Cache expired, fetching new weather data");
-            if let Err(e) = state.update_metrics().await {
-                error!("Failed to update metrics in background: {}", e);
+            if should_update {
+                info!(
+                    "Cache expired for {}, fetching new weather data",
+                    location_name
+                );
+                if let Err(e) = state.update_metrics_for_location(location_name).await {
+                    error!(
+                        "Failed to update metrics for {} in background: {}",
+                        location_name, e
+                    );
+                }
+            } else {
+                debug!("Cache still valid for {}, skipping update", location_name);
             }
-        } else {
-            debug!("Cache still valid, skipping update");
+
+            // Small delay between locations
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
+}
+
+fn parse_locations(input: &str) -> Vec<String> {
+    input
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 #[tokio::main]
@@ -533,21 +638,28 @@ async fn main() -> Result<()> {
         .register(Box::new(WEATHER_API_CALLS.clone()))
         .expect("collector can be registered");
 
-    // Get location from command line args or environment variable
-    let location_name = std::env::args()
+    // Get locations from command line args or environment variable
+    let locations_str = std::env::args()
         .nth(1)
-        .or_else(|| std::env::var("WEATHER_LOCATION").ok())
+        .or_else(|| std::env::var("WEATHER_LOCATIONS").ok())
         .unwrap_or_else(|| "Oslo".to_string());
 
-    info!("Starting weather exporter for location: {}", location_name);
+    let location_names = parse_locations(&locations_str);
 
-    let state = AppState::new(location_name);
-
-    // Initial fetch to validate location
-    if let Err(e) = state.update_metrics().await {
-        error!("Failed initial metrics update: {}", e);
-        // Continue anyway, maybe it will work later
+    if location_names.is_empty() {
+        error!("No valid locations provided");
+        return Err(anyhow::anyhow!("No valid locations provided"));
     }
+
+    info!(
+        "Starting weather exporter for locations: {:?}",
+        location_names
+    );
+
+    let state = AppState::new(location_names);
+
+    // Initial fetch to validate locations
+    state.update_all_metrics().await;
 
     // Start background update task
     let update_state = state.clone();

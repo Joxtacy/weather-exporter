@@ -6,7 +6,7 @@ services:
     ports:
       - "9090:9090"
     environment:
-      - WEATHER_LOCATION=${WEATHER_LOCATION:-Oslo}
+      - WEATHER_LOCATIONS=${WEATHER_LOCATIONS:-Oslo,Stockholm,Copenhagen}
       - PORT=9090
     restart: unless-stopped
 

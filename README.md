@@ -1,13 +1,15 @@
 # Weather Exporter for Prometheus
 
-A Rust-based weather metrics exporter that fetches weather data from yr.no API and exposes it in Prometheus format.
+A Rust-based weather metrics exporter that fetches weather data from yr.no API and exposes it in Prometheus format. Supports monitoring multiple locations simultaneously.
 
 ## Features
 
 - Fetches real-time weather data from yr.no (Norwegian Meteorological Institute)
+- **Supports multiple locations** - monitor weather for multiple cities at once
 - Automatic location search by place name
+- Respects API rate limits with proper caching and conditional requests
 - Exposes metrics in Prometheus format
-- Periodic updates every 5 minutes
+- Independent cache management per location
 - Comprehensive weather metrics including:
   - Temperature (Celsius)
   - Humidity (%)
@@ -25,23 +27,31 @@ cargo build --release
 
 ## Running
 
-### Using command line argument:
+### Single location:
 ```bash
 cargo run -- "Stockholm"
 # or
-./target/release/weather-exporter "New York"
+./target/release/weather-exporter "Oslo"
+```
+
+### Multiple locations (comma-separated):
+```bash
+cargo run -- "Stockholm, Oslo, Copenhagen, Helsinki"
+# or
+./target/release/weather-exporter "New York, Los Angeles, Chicago"
 ```
 
 ### Using environment variable:
 ```bash
-export WEATHER_LOCATION="London"
+export WEATHER_LOCATIONS="London, Paris, Berlin, Rome"
 cargo run
 ```
 
 ### Custom port:
 ```bash
 export PORT=8080
-cargo run -- "Paris"
+export WEATHER_LOCATIONS="Tokyo, Seoul, Beijing"
+cargo run
 ```
 
 ## Docker
@@ -53,9 +63,16 @@ docker build -t weather-exporter .
 
 Run with Docker:
 ```bash
+# Single location
 docker run -d \
   -p 9090:9090 \
-  -e WEATHER_LOCATION="Berlin" \
+  -e WEATHER_LOCATIONS="Berlin" \
+  weather-exporter
+
+# Multiple locations
+docker run -d \
+  -p 9090:9090 \
+  -e WEATHER_LOCATIONS="Berlin, Munich, Hamburg, Frankfurt" \
   weather-exporter
 ```
 
@@ -93,23 +110,45 @@ scrape_configs:
 ## Example Prometheus Queries
 
 ```promql
-# Current temperature
+# Current temperature for a specific location
 weather_temperature_celsius{location="Oslo"}
 
-# Average wind speed over the last hour
-avg_over_time(weather_wind_speed_mps{location="Oslo"}[1h])
+# Compare temperatures across multiple cities
+weather_temperature_celsius
 
-# Alert when temperature drops below freezing
-weather_temperature_celsius{location="Oslo"} < 0
+# Average temperature across all monitored locations
+avg(weather_temperature_celsius)
+
+# Highest wind speed among all locations
+max(weather_wind_speed_mps)
+
+# Locations with humidity above 80%
+weather_humidity_percent > 80
+
+# Average wind speed over the last hour for Stockholm
+avg_over_time(weather_wind_speed_mps{location="Stockholm"}[1h])
+
+# Alert when temperature drops below freezing in any location
+weather_temperature_celsius < 0
+
+# Cache hit rate per location
+rate(weather_cache_hits_total[5m])
 ```
 
 ## Grafana Dashboard
 
 You can visualize these metrics in Grafana. Example panel queries:
 
-- Temperature gauge: `weather_temperature_celsius{location="$location"}`
-- Wind speed time series: `weather_wind_speed_mps{location="$location"}`
-- Humidity percentage: `weather_humidity_percent{location="$location"}`
+- **Temperature comparison**: `weather_temperature_celsius` (use legend format `{{location}}`)
+- **Weather overview table**: Multiple queries with location as a variable
+- **Wind speed time series**: `weather_wind_speed_mps{location=~"$location"}`
+- **Humidity heatmap**: `weather_humidity_percent`
+- **Cache efficiency**: `rate(weather_cache_hits_total[5m]) / rate(weather_api_calls_total[5m])`
+
+Create a Grafana variable for location selection:
+- Variable type: Query
+- Query: `label_values(weather_temperature_celsius, location)`
+- Multi-value: enabled
 
 ## API Attribution
 
