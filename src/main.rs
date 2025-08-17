@@ -1,12 +1,12 @@
 use anyhow::Result;
-use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Router};
+use axum::{Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
 use prometheus::{Encoder, GaugeVec, IntGaugeVec, Opts, Registry, TextEncoder};
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::RwLock;
-use tracing::{error, info, warn, debug};
+use tracing::{debug, error, info, warn};
 
 // Prometheus metrics
 lazy_static! {
@@ -15,67 +15,68 @@ lazy_static! {
         &["location", "latitude", "longitude"]
     )
     .expect("metric can be created");
-    
     static ref HUMIDITY: GaugeVec = GaugeVec::new(
         Opts::new("weather_humidity_percent", "Relative humidity percentage"),
         &["location", "latitude", "longitude"]
     )
     .expect("metric can be created");
-    
     static ref WIND_SPEED: GaugeVec = GaugeVec::new(
         Opts::new("weather_wind_speed_mps", "Wind speed in meters per second"),
         &["location", "latitude", "longitude"]
     )
     .expect("metric can be created");
-    
     static ref WIND_DIRECTION: GaugeVec = GaugeVec::new(
-        Opts::new("weather_wind_direction_degrees", "Wind direction in degrees"),
+        Opts::new(
+            "weather_wind_direction_degrees",
+            "Wind direction in degrees"
+        ),
         &["location", "latitude", "longitude"]
     )
     .expect("metric can be created");
-    
     static ref PRESSURE: GaugeVec = GaugeVec::new(
         Opts::new("weather_pressure_hpa", "Air pressure in hectopascals"),
         &["location", "latitude", "longitude"]
     )
     .expect("metric can be created");
-    
     static ref PRECIPITATION: GaugeVec = GaugeVec::new(
         Opts::new("weather_precipitation_mm", "Precipitation in millimeters"),
         &["location", "latitude", "longitude"]
     )
     .expect("metric can be created");
-    
     static ref CLOUD_COVERAGE: GaugeVec = GaugeVec::new(
-        Opts::new("weather_cloud_coverage_percent", "Cloud coverage percentage"),
+        Opts::new(
+            "weather_cloud_coverage_percent",
+            "Cloud coverage percentage"
+        ),
         &["location", "latitude", "longitude"]
     )
     .expect("metric can be created");
-    
     static ref UV_INDEX: GaugeVec = GaugeVec::new(
         Opts::new("weather_uv_index", "UV index"),
         &["location", "latitude", "longitude"]
     )
     .expect("metric can be created");
-    
     static ref WEATHER_FETCH_SUCCESS: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("weather_fetch_success", "Whether the last weather fetch was successful"),
+        Opts::new(
+            "weather_fetch_success",
+            "Whether the last weather fetch was successful"
+        ),
         &["location"]
     )
     .expect("metric can be created");
-    
     static ref WEATHER_CACHE_HITS: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("weather_cache_hits_total", "Number of times cached data was used"),
+        Opts::new(
+            "weather_cache_hits_total",
+            "Number of times cached data was used"
+        ),
         &["location"]
     )
     .expect("metric can be created");
-    
     static ref WEATHER_API_CALLS: IntGaugeVec = IntGaugeVec::new(
         Opts::new("weather_api_calls_total", "Total number of API calls made"),
         &["location"]
     )
     .expect("metric can be created");
-    
     static ref REGISTRY: Registry = Registry::new();
 }
 
@@ -207,7 +208,7 @@ impl AppState {
             .timeout(Duration::from_secs(30))
             .build()
             .expect("Failed to build HTTP client");
-        
+
         Self {
             location_name,
             location: Arc::new(RwLock::new(None)),
@@ -223,8 +224,9 @@ impl AppState {
         );
 
         info!("Searching for location: {}", self.location_name);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .get(&url)
             .send()
             .await?
@@ -261,12 +263,14 @@ impl AppState {
         // Round coordinates to 4 decimals as required by the API
         let (lat, lon) = location.position.rounded();
         let url = format!(
-            "https://api.met.no/weatherapi/locationforecast/2.0/compact?lat={}&lon={}",
-            lat, lon
+            "https://api.met.no/weatherapi/locationforecast/2.0/compact?lat={lat}&lon={lon}"
         );
 
-        info!("Fetching weather for {} (rounded coords: {}, {})", location.name, lat, lon);
-        
+        info!(
+            "Fetching weather for {} (rounded coords: {}, {})",
+            location.name, lat, lon
+        );
+
         // Build request with If-Modified-Since header if we have cached data
         let mut request = self.client.get(&url);
         if let Some(ref last_mod) = last_modified {
@@ -275,16 +279,14 @@ impl AppState {
         }
 
         let response = request.send().await?;
-        
-        WEATHER_API_CALLS
-            .with_label_values(&[&location.name])
-            .inc();
+
+        WEATHER_API_CALLS.with_label_values(&[&location.name]).inc();
 
         // Handle different status codes
         match response.status() {
             StatusCode::OK => {
                 info!("Received new weather data");
-                
+
                 // Extract headers
                 let expires = response
                     .headers()
@@ -292,7 +294,7 @@ impl AppState {
                     .and_then(|v| v.to_str().ok())
                     .and_then(|s| DateTime::parse_from_rfc2822(s).ok())
                     .map(|dt| dt.with_timezone(&Utc));
-                
+
                 let last_modified = response
                     .headers()
                     .get("last-modified")
@@ -305,13 +307,13 @@ impl AppState {
                 }
 
                 let weather_data = response.json::<WeatherResponse>().await?;
-                
+
                 // Update cache
                 let mut cache = self.weather_cache.write().await;
                 cache.data = Some(weather_data);
                 cache.expires = expires;
                 cache.last_modified = last_modified;
-                
+
                 info!("Weather data cached until: {:?}", expires);
                 Ok(())
             }
@@ -324,15 +326,22 @@ impl AppState {
             }
             StatusCode::TOO_MANY_REQUESTS => {
                 error!("Rate limited by API - too many requests");
-                Err(anyhow::anyhow!("Rate limited - please reduce request frequency"))
+                Err(anyhow::anyhow!(
+                    "Rate limited - please reduce request frequency"
+                ))
             }
             StatusCode::FORBIDDEN => {
                 error!("Forbidden - check User-Agent header");
-                Err(anyhow::anyhow!("API returned 403 Forbidden - check configuration"))
+                Err(anyhow::anyhow!(
+                    "API returned 403 Forbidden - check configuration"
+                ))
             }
             _ => {
                 error!("Unexpected status code: {}", response.status());
-                Err(anyhow::anyhow!("Unexpected API response: {}", response.status()))
+                Err(anyhow::anyhow!(
+                    "Unexpected API response: {}",
+                    response.status()
+                ))
             }
         }
     }
@@ -369,25 +378,28 @@ impl AppState {
 
         // Get weather data from cache
         let cache = self.weather_cache.read().await;
-        let weather = cache.data.as_ref()
+        let weather = cache
+            .data
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("No weather data in cache"))?;
 
         // Find the timeseries entry closest to current time
         let now = Utc::now();
-        let current = weather.properties.timeseries
-            .iter()
-            .min_by_key(|ts| {
-                let diff = if ts.time > now {
-                    ts.time - now
-                } else {
-                    now - ts.time
-                };
-                diff.num_seconds().abs()
-            });
+        let current = weather.properties.timeseries.iter().min_by_key(|ts| {
+            let diff = if ts.time > now {
+                ts.time - now
+            } else {
+                now - ts.time
+            };
+            diff.num_seconds().abs()
+        });
 
         if let Some(current) = current {
-            info!("Using weather data from {} (current time: {})", current.time, now);
-            
+            info!(
+                "Using weather data from {} (current time: {})",
+                current.time, now
+            );
+
             let labels = [
                 &location.name,
                 &location.position.lat.to_string(),
@@ -450,7 +462,7 @@ async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
     let metric_families = REGISTRY.gather();
     let mut buffer = vec![];
     encoder.encode(&metric_families, &mut buffer).unwrap();
-    
+
     String::from_utf8(buffer).unwrap()
 }
 
@@ -460,16 +472,16 @@ async fn health_handler() -> impl IntoResponse {
 
 async fn periodic_update(state: AppState) {
     let mut interval = tokio::time::interval(Duration::from_secs(60)); // Check every minute
-    
+
     loop {
         interval.tick().await;
-        
+
         // Only fetch if cache is expired
         let should_update = {
             let cache = state.weather_cache.read().await;
             cache.is_expired()
         };
-        
+
         if should_update {
             info!("Cache expired, fetching new weather data");
             if let Err(e) = state.update_metrics().await {
@@ -530,7 +542,7 @@ async fn main() -> Result<()> {
     info!("Starting weather exporter for location: {}", location_name);
 
     let state = AppState::new(location_name);
-    
+
     // Initial fetch to validate location
     if let Err(e) = state.update_metrics().await {
         error!("Failed initial metrics update: {}", e);
@@ -559,7 +571,7 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .expect("Failed to bind to address");
-    
+
     axum::serve(listener, app)
         .await
         .expect("Failed to start server");
