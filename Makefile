@@ -25,8 +25,8 @@ help:
 	@echo "  make release-major - Create a major release (x.0.0)"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make run LOCATIONS='Stockholm, Oslo'"
-	@echo "  make docker-run LOCATIONS='London, Paris'"
+	@echo "  make run USER_AGENT='my-app/1.0' LOCATIONS='Stockholm,Oslo'"
+	@echo "  make docker-run WEATHER_USER_AGENT='my-app/1.0 github.com/user/repo'"
 
 # Build commands
 build:
@@ -39,10 +39,10 @@ release:
 LOCATIONS ?= Oslo
 USER_AGENT ?= weather-exporter-dev/1.0 local-development
 run:
-	WEATHER_USER_AGENT="$(USER_AGENT)" RUST_LOG=info cargo run -- "$(LOCATIONS)"
+	cargo run -- --user-agent "$(USER_AGENT)" --locations "$(LOCATIONS)"
 
 run-debug:
-	WEATHER_USER_AGENT="$(USER_AGENT)" RUST_LOG=debug cargo run -- "$(LOCATIONS)"
+	cargo run -- --user-agent "$(USER_AGENT)" --locations "$(LOCATIONS)" --log-level debug
 
 # Testing and checking
 test:
@@ -111,13 +111,17 @@ watch:
 
 # Run with specific log level
 run-info:
-	WEATHER_USER_AGENT="$(USER_AGENT)" RUST_LOG=info cargo run -- "$(LOCATIONS)"
+	cargo run -- --user-agent "$(USER_AGENT)" --locations "$(LOCATIONS)" --log-level info
 
 run-warn:
-	WEATHER_USER_AGENT="$(USER_AGENT)" RUST_LOG=warn cargo run -- "$(LOCATIONS)"
+	cargo run -- --user-agent "$(USER_AGENT)" --locations "$(LOCATIONS)" --log-level warn
 
 run-error:
-	WEATHER_USER_AGENT="$(USER_AGENT)" RUST_LOG=error cargo run -- "$(LOCATIONS)"
+	cargo run -- --user-agent "$(USER_AGENT)" --locations "$(LOCATIONS)" --log-level error
+
+# Check configuration
+check-config:
+	cargo run -- --user-agent "$(USER_AGENT)" --locations "$(LOCATIONS)" --check
 
 # Metrics check - curl the metrics endpoint
 metrics:

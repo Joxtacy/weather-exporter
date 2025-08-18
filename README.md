@@ -74,51 +74,70 @@ cargo build --release
 
 ## Running
 
-### Important: User-Agent Requirement
-
-**The `WEATHER_USER_AGENT` environment variable is REQUIRED.** The yr.no API requires each application to identify itself uniquely.
+### Quick Start
 
 ```bash
-# Set your unique User-Agent (required)
-export WEATHER_USER_AGENT='my-weather-app/1.0 github.com/myusername/myrepo'
-# or
-export WEATHER_USER_AGENT='personal-weather-station/1.0 contact@example.com'
+# Basic usage with required user-agent
+weather-exporter --user-agent 'my-app/1.0 github.com/myuser/myrepo'
+
+# Short form
+weather-exporter -u 'my-app/1.0 contact@example.com' -l Oslo
+
+# Multiple locations
+weather-exporter -u 'my-app/1.0' -l Oslo,Stockholm,Copenhagen
+
+# See all options
+weather-exporter --help
 ```
 
-The User-Agent should include:
-- Your application/organization name
-- Version number
-- Contact information (GitHub URL, email, or website)
+### Command-Line Options
 
-### Single location:
-```bash
-export WEATHER_USER_AGENT='my-app/1.0 github.com/myuser/myrepo'
-cargo run -- "Stockholm"
-# or
-./target/release/weather-exporter "Oslo"
-```
+| Option | Short | Environment Variable | Description | Default |
+|--------|-------|---------------------|-------------|---------|
+| `--user-agent` | `-u` | `WEATHER_USER_AGENT` | **Required:** Unique identifier for yr.no API | - |
+| `--locations` | `-l` | `WEATHER_LOCATIONS` | Comma-separated list of locations | `Oslo` |
+| `--port` | `-p` | `PORT` | Port for metrics endpoint | `9090` |
+| `--log-level` | - | `RUST_LOG` | Log level (trace/debug/info/warn/error) | `info` |
+| `--check` | - | - | Validate configuration and exit | - |
+| `--help` | `-h` | - | Show help information | - |
+| `--version` | `-V` | - | Show version information | - |
 
-### Multiple locations (comma-separated):
-```bash
-export WEATHER_USER_AGENT='my-app/1.0 github.com/myuser/myrepo'
-cargo run -- "Stockholm, Oslo, Copenhagen, Helsinki"
-# or
-./target/release/weather-exporter "New York, Los Angeles, Chicago"
-```
+### User-Agent Format
 
-### Using environment variables:
-```bash
-export WEATHER_USER_AGENT='my-app/1.0 github.com/myuser/myrepo'
-export WEATHER_LOCATIONS="London, Paris, Berlin, Rome"
-cargo run
-```
+The yr.no API requires a unique User-Agent. Format: `<app-name>/<version> <contact>`
 
-### Custom port:
+Good examples:
+- `my-weather-app/1.0 github.com/username/repo`
+- `home-automation/2.5 https://my-website.com`
+- `personal-station/1.0 contact@example.com`
+- `acme-corp/3.0 ops@acme.com`
+
+### Examples
+
 ```bash
-export WEATHER_USER_AGENT='my-app/1.0 github.com/myuser/myrepo'
-export PORT=8080
-export WEATHER_LOCATIONS="Tokyo, Seoul, Beijing"
-cargo run
+# Single location
+weather-exporter -u 'my-app/1.0 github.com/user/repo' -l Stockholm
+
+# Multiple locations with custom port
+weather-exporter \
+  --user-agent 'home-weather/1.0 me@example.com' \
+  --locations 'New York,Los Angeles,Chicago' \
+  --port 8080
+
+# Using environment variables (still works!)
+export WEATHER_USER_AGENT='my-app/1.0 github.com/user/repo'
+export WEATHER_LOCATIONS='London,Paris,Berlin'
+weather-exporter
+
+# Mixed: env var for user-agent, CLI for locations
+export WEATHER_USER_AGENT='my-app/1.0'
+weather-exporter -l Tokyo,Seoul,Beijing
+
+# Check configuration without starting
+weather-exporter -u 'test/1.0' -l Oslo --check
+
+# Debug logging
+weather-exporter -u 'my-app/1.0' --log-level debug
 ```
 
 ## Docker
@@ -130,33 +149,44 @@ docker build -t weather-exporter .
 
 Run with Docker:
 ```bash
-# Single location (User-Agent is REQUIRED)
+# Using command-line arguments
 docker run -d \
   -p 9090:9090 \
-  -e WEATHER_USER_AGENT='my-app/1.0 github.com/myuser/myrepo' \
-  -e WEATHER_LOCATIONS="Berlin" \
+  weather-exporter \
+  --user-agent 'my-app/1.0 github.com/user/repo' \
+  --locations Berlin,Munich
+
+# Using environment variables (for compatibility)
+docker run -d \
+  -p 9090:9090 \
+  -e WEATHER_USER_AGENT='my-app/1.0 github.com/user/repo' \
+  -e WEATHER_LOCATIONS='Berlin,Munich,Hamburg' \
   weather-exporter
 
-# Multiple locations
+# Mixed approach
 docker run -d \
   -p 9090:9090 \
-  -e WEATHER_USER_AGENT='my-app/1.0 github.com/myuser/myrepo' \
-  -e WEATHER_LOCATIONS="Berlin, Munich, Hamburg, Frankfurt" \
-  weather-exporter
+  -e WEATHER_USER_AGENT='my-app/1.0' \
+  weather-exporter -l Stockholm,Oslo
 ```
-
-**Note:** The container will fail to start without the `WEATHER_USER_AGENT` environment variable.
 
 ## Configuration
 
-### Environment Variables
+### Priority Order
 
-| Variable | Required | Description | Example |
-|----------|----------|-------------|---------|
-| `WEATHER_USER_AGENT` | **Yes** | Unique identifier for your application (required by yr.no API) | `my-app/1.0 github.com/user/repo` |
-| `WEATHER_LOCATIONS` | No | Comma-separated list of locations to monitor | `Oslo, Stockholm, Copenhagen` |
-| `PORT` | No | Port for the metrics endpoint (default: 9090) | `8080` |
-| `RUST_LOG` | No | Log level (trace, debug, info, warn, error) | `debug` |
+Configuration values are resolved in the following order (highest to lowest priority):
+1. Command-line arguments
+2. Environment variables
+3. Default values
+
+### Configuration Options
+
+| Option | CLI Argument | Environment Variable | Required | Default | Description |
+|--------|-------------|---------------------|----------|---------|-------------|
+| User-Agent | `--user-agent`, `-u` | `WEATHER_USER_AGENT` | **Yes** | - | Unique identifier for yr.no API |
+| Locations | `--locations`, `-l` | `WEATHER_LOCATIONS` | No | `Oslo` | Comma-separated list of locations |
+| Port | `--port`, `-p` | `PORT` | No | `9090` | Port for metrics endpoint |
+| Log Level | `--log-level` | `RUST_LOG` | No | `info` | Log verbosity (trace/debug/info/warn/error) |
 
 ### User-Agent Format
 

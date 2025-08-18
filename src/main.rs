@@ -1,6 +1,7 @@
 use anyhow::Result;
 use axum::{Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 use chrono::{DateTime, Utc};
+use clap::Parser;
 use lazy_static::lazy_static;
 use prometheus::{Encoder, GaugeVec, IntGaugeVec, Opts, Registry, TextEncoder};
 use serde::{Deserialize, Serialize};
@@ -78,6 +79,86 @@ lazy_static! {
     )
     .expect("metric can be created");
     static ref REGISTRY: Registry = Registry::new();
+}
+
+/// Weather exporter for Prometheus
+///
+/// Fetches weather data from yr.no API and exposes it as Prometheus metrics.
+/// Supports monitoring multiple locations with independent caching.
+#[derive(Parser, Debug)]
+#[command(name = "weather-exporter")]
+#[command(author = "Joxtacy <https://github.com/Joxtacy>")]
+#[command(version)]
+#[command(about = "Export weather data from yr.no as Prometheus metrics", long_about = None)]
+#[command(after_help = "EXAMPLES:
+    # Monitor a single location:
+    weather-exporter --user-agent 'my-app/1.0 github.com/user/repo' --locations Oslo
+
+    # Monitor multiple locations:
+    weather-exporter -u 'my-app/1.0 contact@example.com' -l Oslo,Stockholm,Copenhagen
+
+    # Use environment variables:
+    export WEATHER_USER_AGENT='my-app/1.0 github.com/user/repo'
+    weather-exporter -l London,Paris
+
+    # Custom port:
+    weather-exporter -u 'my-app/1.0' -l Oslo -p 8080
+
+USER-AGENT FORMAT:
+    The User-Agent must uniquely identify your application (required by yr.no).
+    Format: <application>/<version> <contact>
+
+    Examples:
+    - 'my-weather-app/1.0 github.com/username/repo'
+    - 'home-automation/2.5 https://my-website.com'
+    - 'acme-corp/3.0 ops@acme.com'")]
+struct Args {
+    /// User-Agent for yr.no API (required)
+    #[arg(
+        short = 'u',
+        long,
+        env = "WEATHER_USER_AGENT",
+        value_name = "USER_AGENT",
+        help = "Unique identifier for your application"
+    )]
+    user_agent: String,
+
+    /// Comma-separated list of locations to monitor
+    #[arg(
+        short = 'l',
+        long,
+        env = "WEATHER_LOCATIONS",
+        default_value = "Oslo",
+        value_delimiter = ',',
+        value_name = "LOCATIONS",
+        help = "Locations to monitor (e.g., 'Oslo,Stockholm,Copenhagen')"
+    )]
+    locations: Vec<String>,
+
+    /// Port for the metrics endpoint
+    #[arg(
+        short = 'p',
+        long,
+        env = "PORT",
+        default_value_t = 9090,
+        value_name = "PORT",
+        help = "Port to listen on"
+    )]
+    port: u16,
+
+    /// Log level
+    #[arg(
+        long,
+        env = "RUST_LOG",
+        default_value = "info",
+        value_name = "LEVEL",
+        help = "Log level (trace, debug, info, warn, error)"
+    )]
+    log_level: String,
+
+    /// Validate configuration and exit
+    #[arg(long, help = "Validate configuration without starting the server")]
+    check: bool,
 }
 
 // YR.no API response structures
@@ -218,25 +299,6 @@ struct AppState {
 
 impl AppState {
     fn new(location_names: Vec<String>, user_agent: String) -> Result<Self> {
-        // Validate user agent format
-        if user_agent.trim().is_empty() {
-            return Err(anyhow::anyhow!("User agent cannot be empty"));
-        }
-
-        if user_agent.len() < 10 {
-            return Err(anyhow::anyhow!(
-                "User agent too short. Please provide a descriptive identifier (e.g., 'my-app/1.0 github.com/username/repo')"
-            ));
-        }
-
-        if !user_agent.contains('/') && !user_agent.contains(' ') {
-            return Err(anyhow::anyhow!(
-                "User agent should include version or contact info (e.g., 'my-app/1.0' or 'my-app email@example.com')"
-            ));
-        }
-
-        info!("Using User-Agent: {}", user_agent);
-
         let client = reqwest::Client::builder()
             .user_agent(user_agent)
             .timeout(Duration::from_secs(30))
@@ -555,7 +617,7 @@ impl AppState {
 }
 
 async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
-    // Update metrics for all locations before serving them
+    // Update metrics before serving them
     state.update_all_metrics().await;
 
     let encoder = TextEncoder::new();
@@ -608,9 +670,48 @@ async fn periodic_update(state: AppState) {
     }
 }
 
-fn parse_locations(input: &str) -> Vec<String> {
-    input
-        .split(',')
+fn validate_user_agent(user_agent: &str) -> Result<()> {
+    let ua = user_agent.trim();
+
+    if ua.is_empty() {
+        return Err(anyhow::anyhow!(
+            "User-Agent cannot be empty.\n\
+            Example: 'my-app/1.0 github.com/user/repo'"
+        ));
+    }
+
+    if ua.len() < 10 {
+        return Err(anyhow::anyhow!(
+            "User-Agent too short. Please provide a descriptive identifier.\n\
+            Example: 'my-app/1.0 github.com/username/repo'"
+        ));
+    }
+
+    // Check for version number or contact info
+    if !ua.contains('/') && !ua.contains('@') && !ua.contains('.') {
+        return Err(anyhow::anyhow!(
+            "User-Agent should include version and/or contact information.\n\
+            Examples:\n  \
+            - 'my-app/1.0 github.com/user/repo'\n  \
+            - 'weather-monitor/2.0 contact@example.com'\n  \
+            - 'home-automation https://my-site.com'"
+        ));
+    }
+
+    // Warn about generic user agents
+    let lower = ua.to_lowercase();
+    if lower.contains("test") || lower.contains("example") || lower.contains("change-me") {
+        warn!(
+            "User-Agent appears to be a placeholder. Please use a unique identifier for production."
+        );
+    }
+
+    Ok(())
+}
+
+fn clean_locations(locations: &[String]) -> Vec<String> {
+    locations
+        .iter()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()
@@ -618,8 +719,34 @@ fn parse_locations(input: &str) -> Vec<String> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
+    let args = Args::parse();
+
+    // Initialize tracing with the specified log level
     tracing_subscriber::fmt::init();
+
+    // Validate user agent
+    validate_user_agent(&args.user_agent)?;
+
+    // Clean and validate locations
+    let location_names = clean_locations(&args.locations);
+    if location_names.is_empty() {
+        return Err(anyhow::anyhow!("No valid locations provided"));
+    }
+
+    // If --check flag is set, just validate and exit
+    if args.check {
+        println!("✓ Configuration is valid");
+        println!("  User-Agent: {}", args.user_agent);
+        println!("  Locations: {}", location_names.join(", "));
+        println!("  Port: {}", args.port);
+        println!("  Log level: {}", args.log_level);
+        return Ok(());
+    }
+
+    info!("Starting Weather Exporter v{}", env!("CARGO_PKG_VERSION"));
+    info!("User-Agent: {}", args.user_agent);
+    info!("Monitoring locations: {}", location_names.join(", "));
+    info!("Metrics endpoint: http://0.0.0.0:{}/metrics", args.port);
 
     // Register metrics
     REGISTRY
@@ -656,52 +783,7 @@ async fn main() -> Result<()> {
         .register(Box::new(WEATHER_API_CALLS.clone()))
         .expect("collector can be registered");
 
-    // Get User-Agent from environment variable (REQUIRED)
-    let user_agent = match std::env::var("WEATHER_USER_AGENT") {
-        Ok(ua) => ua,
-        Err(_) => {
-            error!("ERROR: WEATHER_USER_AGENT environment variable is required!");
-            error!(
-                "\nThe yr.no API requires each application to identify itself with a unique User-Agent."
-            );
-            error!(
-                "Please set the WEATHER_USER_AGENT environment variable to identify your application."
-            );
-            error!("\nExample:");
-            error!("  export WEATHER_USER_AGENT='my-weather-app/1.0 github.com/myusername/myrepo'");
-            error!(
-                "  export WEATHER_USER_AGENT='personal-weather-monitor/1.0 contact@example.com'"
-            );
-            error!("\nFormat should include:");
-            error!("  - Your application name");
-            error!("  - Version number");
-            error!("  - Contact information (GitHub URL, email, or website)");
-            error!("\nFor more information, see: https://developer.yr.no/doc/GettingStarted/");
-            return Err(anyhow::anyhow!(
-                "WEATHER_USER_AGENT environment variable not set"
-            ));
-        }
-    };
-
-    // Get locations from command line args or environment variable
-    let locations_str = std::env::args()
-        .nth(1)
-        .or_else(|| std::env::var("WEATHER_LOCATIONS").ok())
-        .unwrap_or_else(|| "Oslo".to_string());
-
-    let location_names = parse_locations(&locations_str);
-
-    if location_names.is_empty() {
-        error!("No valid locations provided");
-        return Err(anyhow::anyhow!("No valid locations provided"));
-    }
-
-    info!(
-        "Starting weather exporter for locations: {:?}",
-        location_names
-    );
-
-    let state = AppState::new(location_names, user_agent)?;
+    let state = AppState::new(location_names, args.user_agent)?;
 
     // Initial fetch to validate locations
     state.update_all_metrics().await;
@@ -716,18 +798,13 @@ async fn main() -> Result<()> {
         .route("/health", get(health_handler))
         .with_state(state);
 
-    // Get the port from environment variable or use default
-    let port = std::env::var("PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(9090);
-
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    info!("Weather exporter listening on {}", addr);
+    let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
 
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .expect("Failed to bind to address");
+
+    info!("Weather exporter listening on {}", addr);
 
     axum::serve(listener, app)
         .await
