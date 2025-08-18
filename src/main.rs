@@ -217,12 +217,30 @@ struct AppState {
 }
 
 impl AppState {
-    fn new(location_names: Vec<String>) -> Self {
+    fn new(location_names: Vec<String>, user_agent: String) -> Result<Self> {
+        // Validate user agent format
+        if user_agent.trim().is_empty() {
+            return Err(anyhow::anyhow!("User agent cannot be empty"));
+        }
+
+        if user_agent.len() < 10 {
+            return Err(anyhow::anyhow!(
+                "User agent too short. Please provide a descriptive identifier (e.g., 'my-app/1.0 github.com/username/repo')"
+            ));
+        }
+
+        if !user_agent.contains('/') && !user_agent.contains(' ') {
+            return Err(anyhow::anyhow!(
+                "User agent should include version or contact info (e.g., 'my-app/1.0' or 'my-app email@example.com')"
+            ));
+        }
+
+        info!("Using User-Agent: {}", user_agent);
+
         let client = reqwest::Client::builder()
-            .user_agent("weather-exporter/0.1.0 github.com/Joxtacy/weather-exporter")
+            .user_agent(user_agent)
             .timeout(Duration::from_secs(30))
-            .build()
-            .expect("Failed to build HTTP client");
+            .build()?;
 
         // Initialize HashMap with empty LocationData for each location
         let mut locations = HashMap::new();
@@ -230,11 +248,11 @@ impl AppState {
             locations.insert(name.clone(), LocationData::new());
         }
 
-        Self {
+        Ok(Self {
             location_names,
             locations: Arc::new(RwLock::new(locations)),
             client,
-        }
+        })
     }
 
     async fn search_location(&self, location_name: &str) -> Result<Location> {
@@ -638,6 +656,33 @@ async fn main() -> Result<()> {
         .register(Box::new(WEATHER_API_CALLS.clone()))
         .expect("collector can be registered");
 
+    // Get User-Agent from environment variable (REQUIRED)
+    let user_agent = match std::env::var("WEATHER_USER_AGENT") {
+        Ok(ua) => ua,
+        Err(_) => {
+            error!("ERROR: WEATHER_USER_AGENT environment variable is required!");
+            error!(
+                "\nThe yr.no API requires each application to identify itself with a unique User-Agent."
+            );
+            error!(
+                "Please set the WEATHER_USER_AGENT environment variable to identify your application."
+            );
+            error!("\nExample:");
+            error!("  export WEATHER_USER_AGENT='my-weather-app/1.0 github.com/myusername/myrepo'");
+            error!(
+                "  export WEATHER_USER_AGENT='personal-weather-monitor/1.0 contact@example.com'"
+            );
+            error!("\nFormat should include:");
+            error!("  - Your application name");
+            error!("  - Version number");
+            error!("  - Contact information (GitHub URL, email, or website)");
+            error!("\nFor more information, see: https://developer.yr.no/doc/GettingStarted/");
+            return Err(anyhow::anyhow!(
+                "WEATHER_USER_AGENT environment variable not set"
+            ));
+        }
+    };
+
     // Get locations from command line args or environment variable
     let locations_str = std::env::args()
         .nth(1)
@@ -656,7 +701,7 @@ async fn main() -> Result<()> {
         location_names
     );
 
-    let state = AppState::new(location_names);
+    let state = AppState::new(location_names, user_agent)?;
 
     // Initial fetch to validate locations
     state.update_all_metrics().await;

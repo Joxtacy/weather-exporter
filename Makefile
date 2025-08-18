@@ -37,11 +37,12 @@ release:
 
 # Run the application
 LOCATIONS ?= Oslo
+USER_AGENT ?= weather-exporter-dev/1.0 local-development
 run:
-	RUST_LOG=info cargo run -- "$(LOCATIONS)"
+	WEATHER_USER_AGENT="$(USER_AGENT)" RUST_LOG=info cargo run -- "$(LOCATIONS)"
 
 run-debug:
-	RUST_LOG=debug cargo run -- "$(LOCATIONS)"
+	WEATHER_USER_AGENT="$(USER_AGENT)" RUST_LOG=debug cargo run -- "$(LOCATIONS)"
 
 # Testing and checking
 test:
@@ -72,7 +73,15 @@ docker:
 	docker build -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
 
 docker-run:
-	docker run --rm -p 9090:9090 -e WEATHER_LOCATIONS="$(LOCATIONS)" $(DOCKER_IMAGE):$(DOCKER_TAG)
+	@if [ -z "$WEATHER_USER_AGENT" ]; then \
+		echo "Error: WEATHER_USER_AGENT environment variable is required"; \
+		echo "Example: export WEATHER_USER_AGENT='my-app/1.0 github.com/user/repo'"; \
+		exit 1; \
+	fi
+	docker run --rm -p 9090:9090 \
+		-e WEATHER_USER_AGENT="$WEATHER_USER_AGENT" \
+		-e WEATHER_LOCATIONS="$(LOCATIONS)" \
+		$(DOCKER_IMAGE):$(DOCKER_TAG)
 
 docker-push:
 	docker push $(DOCKER_IMAGE):$(DOCKER_TAG)
@@ -102,13 +111,13 @@ watch:
 
 # Run with specific log level
 run-info:
-	RUST_LOG=info cargo run -- "$(LOCATIONS)"
+	WEATHER_USER_AGENT="$(USER_AGENT)" RUST_LOG=info cargo run -- "$(LOCATIONS)"
 
 run-warn:
-	RUST_LOG=warn cargo run -- "$(LOCATIONS)"
+	WEATHER_USER_AGENT="$(USER_AGENT)" RUST_LOG=warn cargo run -- "$(LOCATIONS)"
 
 run-error:
-	RUST_LOG=error cargo run -- "$(LOCATIONS)"
+	WEATHER_USER_AGENT="$(USER_AGENT)" RUST_LOG=error cargo run -- "$(LOCATIONS)"
 
 # Metrics check - curl the metrics endpoint
 metrics:

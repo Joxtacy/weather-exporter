@@ -74,8 +74,25 @@ cargo build --release
 
 ## Running
 
+### Important: User-Agent Requirement
+
+**The `WEATHER_USER_AGENT` environment variable is REQUIRED.** The yr.no API requires each application to identify itself uniquely.
+
+```bash
+# Set your unique User-Agent (required)
+export WEATHER_USER_AGENT='my-weather-app/1.0 github.com/myusername/myrepo'
+# or
+export WEATHER_USER_AGENT='personal-weather-station/1.0 contact@example.com'
+```
+
+The User-Agent should include:
+- Your application/organization name
+- Version number
+- Contact information (GitHub URL, email, or website)
+
 ### Single location:
 ```bash
+export WEATHER_USER_AGENT='my-app/1.0 github.com/myuser/myrepo'
 cargo run -- "Stockholm"
 # or
 ./target/release/weather-exporter "Oslo"
@@ -83,19 +100,22 @@ cargo run -- "Stockholm"
 
 ### Multiple locations (comma-separated):
 ```bash
+export WEATHER_USER_AGENT='my-app/1.0 github.com/myuser/myrepo'
 cargo run -- "Stockholm, Oslo, Copenhagen, Helsinki"
 # or
 ./target/release/weather-exporter "New York, Los Angeles, Chicago"
 ```
 
-### Using environment variable:
+### Using environment variables:
 ```bash
+export WEATHER_USER_AGENT='my-app/1.0 github.com/myuser/myrepo'
 export WEATHER_LOCATIONS="London, Paris, Berlin, Rome"
 cargo run
 ```
 
 ### Custom port:
 ```bash
+export WEATHER_USER_AGENT='my-app/1.0 github.com/myuser/myrepo'
 export PORT=8080
 export WEATHER_LOCATIONS="Tokyo, Seoul, Beijing"
 cargo run
@@ -110,18 +130,52 @@ docker build -t weather-exporter .
 
 Run with Docker:
 ```bash
-# Single location
+# Single location (User-Agent is REQUIRED)
 docker run -d \
   -p 9090:9090 \
+  -e WEATHER_USER_AGENT='my-app/1.0 github.com/myuser/myrepo' \
   -e WEATHER_LOCATIONS="Berlin" \
   weather-exporter
 
 # Multiple locations
 docker run -d \
   -p 9090:9090 \
+  -e WEATHER_USER_AGENT='my-app/1.0 github.com/myuser/myrepo' \
   -e WEATHER_LOCATIONS="Berlin, Munich, Hamburg, Frankfurt" \
   weather-exporter
 ```
+
+**Note:** The container will fail to start without the `WEATHER_USER_AGENT` environment variable.
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Required | Description | Example |
+|----------|----------|-------------|---------|
+| `WEATHER_USER_AGENT` | **Yes** | Unique identifier for your application (required by yr.no API) | `my-app/1.0 github.com/user/repo` |
+| `WEATHER_LOCATIONS` | No | Comma-separated list of locations to monitor | `Oslo, Stockholm, Copenhagen` |
+| `PORT` | No | Port for the metrics endpoint (default: 9090) | `8080` |
+| `RUST_LOG` | No | Log level (trace, debug, info, warn, error) | `debug` |
+
+### User-Agent Format
+
+The yr.no API requires a unique User-Agent to identify your application. The format should be:
+
+```
+<application-name>/<version> <contact-information>
+```
+
+Good examples:
+- `my-weather-app/1.0 github.com/myusername/my-weather-app`
+- `home-automation/2.5 https://my-website.com`
+- `personal-weather-station/1.0 contact@example.com`
+- `acme-corp-weather/3.0 weather-admin@acme.com`
+
+The User-Agent helps yr.no:
+- Contact you if there are issues with your usage
+- Provide better service by understanding usage patterns
+- Ensure fair use of their free API
 
 ## Prometheus Configuration
 
