@@ -1,0 +1,28 @@
+services:
+  weather-exporter:
+    build: .
+    ports:
+      - 9094:9090
+    command: '--user-agent "weather-exporter/0.1.0 github.com/joxtacy/weather-exporter" --locations Lund,Tokyo,Malmö,Copenhagen,Oslo,Helsinki,Stockholm'
+    restart: unless-stopped
+    networks:
+      - weather-exporter
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - 9091:9090
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    restart: unless-stopped
+    networks:
+      - weather-exporter
+
+volumes:
+  prometheus_data:
+networks:
+  weather-exporter:

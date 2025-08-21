@@ -3,8 +3,8 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: 'weather'
+  - job_name: "weather"
     static_configs:
-      - targets: ['weather-exporter:9090']
+      - targets: ["weather-exporter:9090"]
     scrape_interval: 5m
     scrape_timeout: 30s
