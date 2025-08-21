@@ -177,7 +177,6 @@ struct EmbeddedLocations {
 struct Location {
     name: String,
     position: Position,
-    category: Option<LocationCategory>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -194,11 +193,6 @@ impl Position {
             (self.lon * 10000.0).round() / 10000.0,
         )
     }
-}
-
-#[derive(Debug, Deserialize, Clone)]
-struct LocationCategory {
-    name: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
