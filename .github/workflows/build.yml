@@ -2,11 +2,11 @@ name: Build and Test
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
     tags:
-      - 'v*'
+      - "v*"
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
 
 env:
   CARGO_TERM_COLOR: always
@@ -124,7 +124,13 @@ jobs:
         if: matrix.platform.target == 'armv7-unknown-linux-gnueabihf'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-arm-linux-gnueabihf
+          sudo apt-get install -y gcc-arm-linux-gnueabihf libssl-dev:armhf pkg-config
+
+      - name: Install cross-compilation tools for ARM64
+        if: matrix.platform.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev:arm64 pkg-config
 
       - name: Cache cargo registry
         uses: actions/cache@v4
