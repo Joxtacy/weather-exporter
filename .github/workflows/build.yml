@@ -123,12 +123,14 @@ jobs:
       - name: Install cross-compilation tools for ARMv7
         if: matrix.platform.target == 'armv7-unknown-linux-gnueabihf'
         run: |
+          sudo dpkg --add-architecture armhf
           sudo apt-get update
           sudo apt-get install -y gcc-arm-linux-gnueabihf libssl-dev:armhf pkg-config
 
       - name: Install cross-compilation tools for ARM64
         if: matrix.platform.target == 'aarch64-unknown-linux-gnu'
         run: |
+          sudo dpkg --add-architecture arm64
           sudo apt-get update
           sudo apt-get install -y libssl-dev:arm64 pkg-config
 
