@@ -3,3 +3,8 @@
 *.pdb
 .env
 .DS_Store
+
+# Claude Code
+.claude/settings.local.json
+.claude/chats/
+.claude/*.local.*
