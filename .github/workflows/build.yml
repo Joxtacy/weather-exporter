@@ -74,18 +74,6 @@ jobs:
             bin: weather-exporter
             command: build
 
-          - name: linux-arm64
-            os: ubuntu-22.04
-            target: aarch64-unknown-linux-gnu
-            bin: weather-exporter
-            command: build
-
-          - name: linux-armv7
-            os: ubuntu-22.04
-            target: armv7-unknown-linux-gnueabihf
-            bin: weather-exporter
-            command: build
-
           # Windows builds
           - name: windows-amd64
             os: windows-latest
