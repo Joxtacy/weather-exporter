@@ -287,63 +287,7 @@ This application uses the yr.no API provided by the Norwegian Meteorological Ins
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-### Development
-
-```bash
-# Run tests
-cargo test
-# or
-make test
-
-# Run with logging
-RUST_LOG=debug cargo run -- "Oslo"
-# or
-make run-debug LOCATIONS="Oslo"
-
-# Format code
-cargo fmt
-# or
-make fmt
-
-# Run clippy
-cargo clippy -- -D warnings
-# or
-make lint
-
-# Run all checks
-make check
-```
-
-### Releasing
-
-To create a new release:
-
-```bash
-# Patch release (bug fixes)
-make release-patch
-# or
-./scripts/release.sh patch
-
-# Minor release (new features)
-make release-minor
-# or
-./scripts/release.sh minor
-
-# Major release (breaking changes)
-make release-major
-# or
-./scripts/release.sh major
-```
-
-See [RELEASING.md](RELEASING.md) for detailed release instructions.
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines and release procedures.
 
 ## Author
 
